@@ -1,0 +1,137 @@
+name: Build Trader OS v3.0.2 ready
+
+on:
+  push:
+    branches: [v3.0.2-ready]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3.0.2-ready
+          fetch-depth: 0
+
+      - name: Apply v3.0.2 source changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          def read(p): return Path(p).read_text(encoding='utf-8')
+          def write(p, s):
+              x=Path(p); x.parent.mkdir(parents=True, exist_ok=True); x.write_text(s, encoding='utf-8')
+          def rep(s, old, new, label):
+              n=s.count(old)
+              if n != 1: raise SystemExit(f'{label}: expected 1 match, got {n}')
+              return s.replace(old,new,1)
+
+          deep_cache = r'''import type { MarketContext, TradePlan } from "@trader-os/shared";
+          import { dataPath, isoNow, readJsonFile, writeJsonFile } from "./store.js";
+
+          interface DeepCandidateCacheItem { plan: TradePlan; analyzedAt: string }
+          interface DeepCandidateCacheState { updatedAt: string; items: Record<string, DeepCandidateCacheItem> }
+
+          const cachePath=dataPath("deep-candidate-cache.json");
+          const ttlMs=Math.max(10*60_000,Number(process.env.DEEP_ANALYSIS_CACHE_MS??45*60_000));
+          const maxPool=Math.max(12,Math.min(120,Number(process.env.DEEP_ANALYSIS_FRESH_POOL_MAX??48)));
+
+          function load():DeepCandidateCacheState{return readJsonFile<DeepCandidateCacheState>(cachePath,{updatedAt:isoNow(),items:{}})}
+
+          export function mergeDeepCandidateCache(current:TradePlan[],market:MarketContext):TradePlan[]{
+            const state=load(),now=Date.now(),currentSymbols=new Set(current.map(x=>x.symbol.toUpperCase()));
+            for(const plan of current)state.items[plan.symbol.toUpperCase()]={plan,analyzedAt:isoNow()};
+            const fresh=Object.entries(state.items).map(([symbol,item])=>({symbol,...item,at:Date.parse(item.analyzedAt)})).filter(x=>Number.isFinite(x.at)&&now-x.at<=ttlMs).sort((a,b)=>{const ac=a.plan.convictionScore??a.plan.setupScore*10,bc=b.plan.convictionScore??b.plan.setupScore*10;return bc-ac||b.at-a.at}).slice(0,maxPool);
+            state.items=Object.fromEntries(fresh.map(x=>[x.symbol,{plan:x.plan,analyzedAt:x.analyzedAt}]));state.updatedAt=isoNow();writeJsonFile(cachePath,state);
+            const reused=fresh.filter(x=>!currentSymbols.has(x.symbol)).map(x=>{const ageMinutes=Math.max(1,Math.round((now-x.at)/60_000)),flags=(x.plan.dataFlags??[]).filter(f=>!f.startsWith("DEEP_CACHE_"));return{...x.plan,dataFlags:[...flags,"DEEP_CACHE_REUSED",`DEEP_CACHE_AGE_MIN_${ageMinutes}`],context:{...x.plan.context,marketBias:market.bias,marketRegime:market.regime,breadth:market.breadth,marketQuotes:market.quotes,regimeScore:market.regimeScore,regimeReasons:market.regimeReasons}} as TradePlan});
+            return[...current,...reused].slice(0,maxPool)
+          }
+
+          export function getDeepCandidateCacheStatus(){const state=load(),now=Date.now(),ages=Object.values(state.items).map(x=>Date.parse(x.analyzedAt)).filter(Number.isFinite).map(t=>Math.max(0,Math.round((now-t)/60_000)));return{enabled:true,freshCandidates:ages.length,ttlMinutes:Math.round(ttlMs/60_000),maxPool,oldestAgeMinutes:ages.length?Math.max(...ages):0,updatedAt:state.updatedAt}}
+          '''.replace('\n          ','\n').lstrip()
+          write('server/src/deep-candidate-cache.ts', deep_cache)
+
+          test_ts = r'''import assert from "node:assert/strict";
+          import test from "node:test";
+          import { evaluatePreTradeGate } from "./pretrade-gate.js";
+
+          const validSetup:any={symbol:"TEST",side:"LONG",status:"ARMED",verdict:"ENTER",setupScore:8,entry:100,stop:98,tp1:104,tp2:106,riskReward:2.5,levelQuality:"STRUCTURAL",quote:{symbol:"TEST",price:100,timestamp:new Date().toISOString()},dataQualityPct:95,dataConfidenceScore:90,spreadPct:.2,secCriticalRisk:false,eventRiskLocked:false,notes:[],technicals:{mtfQualityPct:90,averageDollarVolume20d:50_000_000,trend:"BULLISH",timeframeAlignmentPct:85,relativeVolume:1.5,roomToResistanceR:3},context:{marketRegime:"TREND_UP",sectorAlignment:"TAILWIND"}};
+          test("v3.0.2 closed market waits instead of rejecting setup",()=>{const r=evaluatePreTradeGate(validSetup,"CLOSED");assert.equal(r.gates.marketOpen,false);assert.equal(r.verdict,"WAIT");assert.ok(!r.blockers.some(x=>x.includes("אינו פתוח")))});
+          test("v3.0.2 unverified premarket waits",()=>{const r=evaluatePreTradeGate({...validSetup,preMarketVerified:false},"PRE");assert.equal(r.gates.sessionPriceVerified,false);assert.equal(r.verdict,"WAIT")});
+          '''.replace('\n          ','\n').lstrip()
+          write('server/src/v302.test.ts',test_ts)
+
+          p='server/src/trader.ts'; s=read(p)
+          s=rep(s,'import { buildAdvancedDecision } from "./reasoning-engine.js";','import { buildAdvancedDecision } from "./reasoning-engine.js";\nimport { getDeepCandidateCacheStatus, mergeDeepCandidateCache } from "./deep-candidate-cache.js";','trader import')
+          s=rep(s,'    let quality=98; if(stale)quality=72; if((plan.technicals?.mtfQualityPct??0)<70)quality=Math.min(quality,68); if(marketStatus==="PRE")quality=preVerified?78:45; if(marketStatus==="AFTER")quality=Math.min(quality,70);','    let quality=98; if(stale)quality=72; if((plan.technicals?.mtfQualityPct??0)<70)quality=Math.min(quality,68); if(marketStatus==="PRE"&&!preVerified)quality=Math.min(quality,82); if(marketStatus==="AFTER")quality=Math.min(quality,90);','trader quality')
+          s=rep(s,'  candidates.sort((a,b)=>{const q=(b.dataQualityPct??0)-(a.dataQualityPct??0);return Math.abs(q)>=20?q:(b.convictionScore??b.setupScore*10)-(a.convictionScore??a.setupScore*10)});','  const deepPool=mergeDeepCandidateCache(candidates,marketContext).map(plan=>{const eventRisks=eventRisksFor(plan.symbol),eventRiskLocked=eventRisks.some(e=>e.blocksEntry);return{...plan,eventRisks,eventRiskLocked,verdict:eventRiskLocked&&plan.verdict==="ENTER"?"NO_ENTRY":plan.verdict}});\n  candidates.splice(0,candidates.length,...deepPool);\n  candidates.sort((a,b)=>{const q=(b.dataQualityPct??0)-(a.dataQualityPct??0);return Math.abs(q)>=20?q:(b.convictionScore??b.setupScore*10)-(a.convictionScore??a.setupScore*10)});','trader deep pool')
+          s=rep(s,'בריצה הזו נבדקו ${universe.length} מחירים ו-${shortlist.length} פיינליסטיות עברו לניתוח עמוק; ${ohlcv} עם OHLCV מלא.','בריצה הזו נבדקו ${universe.length} מחירים ו-${shortlist.length} פיינליסטיות חדשות עברו לניתוח עמוק; מאגר ה-Deep Analysis הטרי כולל ${candidates.length} מועמדות, מתוכן ${ohlcv} עם OHLCV מלא.','trader summary')
+          s=rep(s,'export function getScannerStatus(){return{...getScannerCoverage(),quoteBudget,rotationBatchSize,deepAnalysisMax,explorationSlots,cooldownSeconds:Math.round(scanCooldownMs/1000),fullMarket:fullMarketStatus()}}','export function getScannerStatus(){return{...getScannerCoverage(),quoteBudget,rotationBatchSize,deepAnalysisMax,explorationSlots,cooldownSeconds:Math.round(scanCooldownMs/1000),deepCache:getDeepCandidateCacheStatus(),fullMarket:fullMarketStatus()}}','scanner status')
+          s=rep(s,'      const advancedVerdict=advanced.judgeVerdict==="ENTER"?"ENTER":advanced.judgeVerdict==="ARMED"||advanced.judgeVerdict==="WAIT"?"WAIT":"NO_ENTRY";','      const advancedVerdict=advanced.judgeVerdict==="ENTER"?(scan.market.status==="OPEN"&&!finalSetup.dataFlags?.includes("DEEP_CACHE_REUSED")?"ENTER":"WAIT"):advanced.judgeVerdict==="ARMED"||advanced.judgeVerdict==="WAIT"?"WAIT":"NO_ENTRY";','find trade execution')
+          s=rep(s,'    try{const advanced=await buildAdvancedDecision(finalSetup,finalSetup.convictionScore??finalSetup.setupScore*10,true);const finalVerdict=advanced.judgeVerdict==="ENTER"?"ENTER":advanced.judgeVerdict==="ARMED"||advanced.judgeVerdict==="WAIT"?"WAIT":"NO_ENTRY";','    try{const advanced=await buildAdvancedDecision(finalSetup,finalSetup.convictionScore??finalSetup.setupScore*10,true);const finalVerdict=advanced.judgeVerdict==="ENTER"?(market.status==="OPEN"?"ENTER":"WAIT"):advanced.judgeVerdict==="ARMED"||advanced.judgeVerdict==="WAIT"?"WAIT":"NO_ENTRY";','check entry execution')
+          s=s.replace('rulesetVersion:"3.0.1-evidence-driven"','rulesetVersion:"3.0.2-deep-coverage"')
+          write(p,s)
+
+          p='server/src/pretrade-gate.ts'; s=read(p)
+          s=rep(s,'    marketOpen:marketStatus==="OPEN",\n    marketNotRiskOff:setup.context?.marketRegime!=="RISK_OFF",','    marketOpen:marketStatus==="OPEN",\n    sessionPriceVerified:marketStatus!=="PRE"||setup.preMarketVerified===true,\n    marketNotRiskOff:setup.context?.marketRegime!=="RISK_OFF",','pretrade session gate')
+          s=rep(s,'gates.structuralRoom && gates.marketOpen && gates.eventRiskClear &&','gates.structuralRoom && gates.eventRiskClear &&','pretrade hard gate')
+          s=rep(s,'add(gates.structuralRoom,"ההתנגדות הבאה קרובה מדי ואינה משאירה מספיק מרווח לעסקה."); add(gates.marketOpen,"המסחר הרגיל אינו פתוח; לא מאשרים כניסה חדשה."); add(gates.eventRiskClear,','add(gates.structuralRoom,"ההתנגדות הבאה קרובה מדי ואינה משאירה מספיק מרווח לעסקה."); add(gates.eventRiskClear,','pretrade blocker')
+          s=rep(s,'  const verdict=hardFailed?"NO_ENTRY":setup.verdict==="ENTER"&&gates.bullishTrend&&gates.multiTimeframe&&gates.relativeVolume?"ENTER":"WAIT";','  if(!gates.marketOpen)warnings.push("השוק סגור כרגע: ה-Setup יכול להישאר תקף/ARMED, אבל אין אישור ביצוע עד לפתיחת המסחר הרגיל.");if(!gates.sessionPriceVerified)warnings.push("מחיר ה-Pre-Market עדיין לא אומת מספיק לביצוע; איכות ה-Setup נשמרת אך הביצוע ממתין.");\n  const verdict=hardFailed?"NO_ENTRY":gates.marketOpen&&gates.sessionPriceVerified&&setup.verdict==="ENTER"&&gates.bullishTrend&&gates.multiTimeframe&&gates.relativeVolume?"ENTER":"WAIT";','pretrade verdict')
+          write(p,s)
+
+          p='server/src/strategy-engine.ts'; s=read(p)
+          s=s.replace('const RULESET_VERSION="3.0.1-evidence-driven";','const RULESET_VERSION="3.0.2-deep-coverage";')
+          s=rep(s,' else if(gate.verdict==="ENTER"&&p.entry&&p.stop&&rr>=MIN_OPPORTUNITY_RR&&confidence>=78)verdict="READY";\n else if(p.status==="ARMED"&&p.entry&&p.stop&&rr>=MIN_OPPORTUNITY_RR&&confidence>=70)verdict="ARMED";',' else if(gate.verdict==="ENTER"&&p.entry&&p.stop&&rr>=MIN_OPPORTUNITY_RR&&confidence>=78&&!p.dataFlags?.includes("DEEP_CACHE_REUSED"))verdict="READY";\n else if((!gate.gates.marketOpen||p.dataFlags?.includes("DEEP_CACHE_REUSED")||p.status==="ARMED")&&p.entry&&p.stop&&rr>=MIN_OPPORTUNITY_RR&&confidence>=70)verdict="ARMED";','strategy readiness')
+          s=rep(s,'else if(decision.judgeVerdict==="ENTER"&&o.verdict!=="REJECT")o.verdict="READY"','else if(decision.judgeVerdict==="ENTER"&&o.verdict!=="REJECT")o.verdict=scan.market.status==="OPEN"&&!p.dataFlags?.includes("DEEP_CACHE_REUSED")?"READY":"ARMED"','strategy advanced')
+          old='summary:`דירוג ${scan.scanId}: כיסוי שוק מלא ${scan.stats.fullMarketCoveragePct??0}% (${scan.stats.fullMarketChecked??0}/${scan.stats.fullMarketCatalogSize??0}); בריצה הזו ${scan.stats.shortlisted} פיינליסטיות עברו לניתוח עמוק ו-${scan.stats.ohlcvValidated} קיבלו נתונים מלאים. ועדת הראיות אישרה ${ready} מוכנות ו-${armed} ממתינות לטריגר; ${rejected.length} נפסלו. ${(scan.stats.fullMarketCoveragePct??0)<100?"הדירוג זמני עד להשלמת הסבב המלא.":"הסבב המלא הושלם."}`'
+          new='summary:`דירוג ${scan.scanId}: Discovery כיסה ${scan.stats.fullMarketCoveragePct??0}% מהקטלוג (${scan.stats.fullMarketChecked??0}/${scan.stats.fullMarketCatalogSize??0}) — זה Quote/Snapshot ולא ניתוח עסקה מלא. בריצה הזו ${scan.stats.shortlisted} מניות חדשות עברו Deep Analysis; מאגר הניתוחים הטריים שמדורג כעת כולל ${scan.candidates.length} מניות. מתוכן ${ready} READY לביצוע עכשיו, ${armed} ARMED/ממתינות לטריגר או לפתיחת השוק, ו-${rejected.length} נפסלו. ${(scan.stats.fullMarketCoveragePct??0)<100?"Discovery עדיין לא השלים את כל הקטלוג.":"Discovery השלים סבב קטלוג מלא."}`'
+          s=rep(s,old,new,'strategy summary')
+          write(p,s)
+
+          p='preview/index.html'; s=read(p)
+          s=s.replace('הדירוג זמני.</b> טופלו ${attempted}% מהקטלוג ו-${success}% התקבלו בהצלחה. הפיינליסטיות נשמרות לאורך כל הסבב.','הדירוג זמני.</b> ${attempted}% מהקטלוג עברו Discovery (Quote/Snapshot בלבד) ו-${success}% התקבלו בהצלחה. רק הפיינליסטיות עוברות Deep Analysis; התוצאות העמוקות מצטברות למאגר Fresh.')
+          s=s.replace('סבב Discovery מלא הושלם בהצלחה.</b> עכשיו הפיינליסטיות עוברות ניתוח עומק בהדרגה לפי מכסת OHLCV.','סבב Discovery מלא הושלם בהצלחה.</b> זה לא אומר שכל המניות עברו בדיקת עסקה מלאה. הפיינליסטיות עוברות Deep Analysis בהדרגה והתוצאות הטריות מצטברות בין הריצות לפי מכסת OHLCV.')
+          write(p,s)
+
+          p='server/src/index.ts'; s=read(p).replace('dashboard-v301.html','dashboard-v302.html').replace('VERSION="3.0.1"','VERSION="3.0.2"'); write(p,s)
+          p='preview/sw.js'; write(p,read(p).replace('trader-os-v3.0.1-ui-bootstrap-fix','trader-os-v3.0.2-deep-coverage'))
+          p='docker-compose.yml'; write(p,read(p).replace('trader-os:3.0.1-evidence-driven','trader-os:3.0.2-deep-coverage'))
+          write('VERSION','3.0.2\n')
+          for p in ['package.json','server/package.json','shared/package.json','web/package.json']:
+              s=read(p).replace('"version": "3.0.1"','"version": "3.0.2"')
+              if p=='server/package.json': s=s.replace('"@trader-os/shared": "3.0.1"','"@trader-os/shared": "3.0.2"')
+              write(p,s)
+          if Path('package-lock.json').exists():
+              write('package-lock.json',read('package-lock.json').replace('"version": "3.0.1"','"version": "3.0.2"').replace('"@trader-os/shared": "3.0.1"','"@trader-os/shared": "3.0.2"'))
+
+          write('CHANGELOG-v3.0.2.md','# Trader OS v3.0.2 — Deep Coverage + Execution-State Fix\n\n- Discovery coverage is labeled honestly as Quote/Snapshot coverage.\n- Deep analyses accumulate in a fresh rolling pool instead of ranking only the current 3 symbols.\n- Closed market blocks execution but no longer rejects setup quality.\n- Cached deep candidates can be ARMED/WATCH but cannot become READY until refreshed.\n- Hard risk gates remain unchanged.\n')
+          write('MIGRATION-v3.0.1-to-v3.0.2.md','# Trader OS v3.0.2\n\nPut your existing `.env` in the project root, then run `docker compose build --no-cache` and `docker compose up -d`. Do not use `docker compose down -v`. Optional: `DEEP_ANALYSIS_CACHE_MS=2700000` and `DEEP_ANALYSIS_FRESH_POOL_MAX=48`.\n')
+          write('.gitignore','.env\n.env.*\n!.env.example\nnode_modules/\ndist/\nbuild/\n.next/\ndata/\n*.db\n*.sqlite\n*.sqlite3\n*.log\n.DS_Store\n')
+          write('.env.example','# Trader OS v3.0.2 — copy to .env and fill your own keys\nPORT=8787\nDATA_DIR=/app/data\nFINNHUB_API_KEY=\nTWELVE_DATA_API_KEY=\nALPACA_API_KEY_ID=\nALPACA_API_SECRET_KEY=\nFRED_API_KEY=\nAPP_ACCESS_TOKEN=\nSTORAGE_BACKEND=sqlite\nDEEP_ANALYSIS_MAX_SYMBOLS=3\nDEEP_ANALYSIS_CACHE_MS=2700000\nDEEP_ANALYSIS_FRESH_POOL_MAX=48\n')
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate build and tests
+        run: |
+          npm install
+          npm test
+          npm run build
+
+      - name: Remove temporary workflow and commit ready source
+        shell: bash
+        run: |
+          rm -f .github/workflows/build-v3.0.2-ready.yml
+          git config user.name "Trader OS Builder"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Trader OS v3.0.2 ready source"
+          git push origin HEAD:v3.0.2-ready
