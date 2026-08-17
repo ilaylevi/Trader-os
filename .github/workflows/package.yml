@@ -1,0 +1,33 @@
+name: Package Trader OS v3.0.2
+
+on:
+  push:
+    branches: [v3.0.2-package]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v3.0.2-ready
+      - name: Verify source
+        shell: bash
+        run: |
+          test "$(cat VERSION)" = "3.0.2"
+          test -f server/src/deep-candidate-cache.ts
+          test ! -f .env
+      - name: Upload full source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trader-os-v3.0.2
+          path: |
+            .
+            !.git/**
+            !node_modules/**
+            !**/dist/**
+          include-hidden-files: true
+          if-no-files-found: error
