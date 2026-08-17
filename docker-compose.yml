@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: trader-os:3.0.1-evidence-driven
+    image: trader-os:3.0.2-deep-coverage
     container_name: trader-os
     restart: unless-stopped
     ports:
