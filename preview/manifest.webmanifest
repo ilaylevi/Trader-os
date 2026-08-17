@@ -1,0 +1,9 @@
+{
+  "name": "Trader OS v3 — Evidence-Driven",
+  "short_name": "Trader OS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090b10",
+  "theme_color": "#0b0e14",
+  "description": "מערכת מסחר Evidence-Driven בעברית עם ועדת ראיות, סריקת שוק, ניהול עסקה, מחקר ולמידה — ללא עלות AI."
+}

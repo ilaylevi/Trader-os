@@ -1,0 +1,8 @@
+import { getSecurityIdentity } from "./sec-intelligence.js";
+import { getWarehouseBars } from "./market-warehouse.js";
+
+const peerMap:Record<string,string[]>={
+  Technology:["NVDA","AMD","AVGO","ANET","MSFT","AAPL","ORCL","CRWD","MU","QCOM"],
+  "Communication Services":["META","GOOGL","NFLX","TMUS"],Financials:["JPM","BAC","GS","MS","WFC"],Industrials:["GE","CAT","BA","DE","HON"],Energy:["XOM","CVX","COP","SLB"],"Consumer Discretionary":["AMZN","TSLA","NKE","MCD","SBUX"],"Health Care":["LLY","UNH","JNJ","MRK","ABBV"]};
+function ret(sym:string,days:number){const b=getWarehouseBars(sym,"1d",days+5);if(b.length<days+1)return undefined;return (b[b.length-1].close/b[b.length-1-days].close-1)*100}
+export async function getPeerIntelligence(symbol:string){const sym=symbol.trim().toUpperCase(),id=await getSecurityIdentity(sym,false).catch(()=>({symbol:sym} as any)),peers=(peerMap[id.sector??""]??[]).filter(x=>x!==sym).slice(0,8),rows=peers.map(p=>({symbol:p,ret1d:ret(p,1),ret5d:ret(p,5)})).filter(x=>x.ret1d!==undefined||x.ret5d!==undefined),self1=ret(sym,1),self5=ret(sym,5),avg=(a:number[])=>a.length?a.reduce((s,x)=>s+x,0)/a.length:undefined,p1=avg(rows.flatMap(x=>x.ret1d===undefined?[]:[x.ret1d])),p5=avg(rows.flatMap(x=>x.ret5d===undefined?[]:[x.ret5d]));return{symbol:sym,sector:id.sector,peerBasket:rows,ret1d:self1,ret5d:self5,residual1dPct:self1!==undefined&&p1!==undefined?Number((self1-p1).toFixed(2)):undefined,residual5dPct:self5!==undefined&&p5!==undefined?Number((self5-p5).toFixed(2)):undefined,note:rows.length?"Residual strength מחושב מול סל peers מקומי חלקי; הוא Context ולא מדד מוסדי מלא.":"אין עדיין מספיק היסטוריה מקומית ל-Peer Intelligence."}}

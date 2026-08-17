@@ -1,0 +1,26 @@
+services:
+  trader-os:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: trader-os:3.0.1-evidence-driven
+    container_name: trader-os
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+    volumes:
+      - trader_os_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+volumes:
+  trader_os_data:

@@ -1,0 +1,17 @@
+{
+  "name": "trader-os",
+  "version": "3.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web",
+    "shared"
+  ],
+  "scripts": {
+    "build": "npm run build -w shared && npm run build -w web && npm run build -w server",
+    "dev": "npm run dev -w server",
+    "start": "npm run start -w server",
+    "test": "npm run test -w server"
+  }
+}

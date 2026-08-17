@@ -1,0 +1,23 @@
+{
+  "name": "@trader-os/server",
+  "version": "3.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.0.1",
+    "@modelcontextprotocol/sdk": "1.24.0",
+    "@trader-os/shared": "3.0.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "tsx": "4.19.3",
+    "typescript": "5.8.3"
+  }
+}
