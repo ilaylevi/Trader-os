@@ -29,6 +29,7 @@ export function evaluatePreTradeGate(setup:TradePlan,marketStatus:MarketSession,
     riskReward:(setup.riskReward??0)>=2,
     structuralRoom:(setup.technicals?.roomToResistanceR??3)>=2,
     marketOpen:marketStatus==="OPEN",
+    sessionPriceVerified:marketStatus!=="PRE"||setup.preMarketVerified===true,
     marketNotRiskOff:setup.context?.marketRegime!=="RISK_OFF",
     sectorNotHeadwind:setup.context?.sectorAlignment!=="HEADWIND",
     eventRiskClear:!setup.eventRiskLocked,
@@ -41,14 +42,15 @@ export function evaluatePreTradeGate(setup:TradePlan,marketStatus:MarketSession,
   };
   const blockers:string[]=[]; const warnings:string[]=[];
   const add=(ok:boolean,msg:string)=>{if(!ok)blockers.push(msg)};
-  add(gates.dataQuality,"איכות הנתונים אינה מספיקה לביצוע."); add(gates.dataConfidence,`ציון אמינות המידע נמוך מ-${minDataConfidence}%.`); add(gates.spreadAcceptable,`הספרד רחב מדי לביצוע (${setup.spreadPct?.toFixed(2)??"—"}% > ${maxSpread}%).`); add(gates.secRiskClear,"קיים דיווח SEC טרי שמפעיל חסימת סיכון (למשל גיוס/דילול). "); add(gates.trueMtf,"אין מספיק היסטוריה אמינה בכל טווחי הזמן."); add(gates.liquidity,`הנזילות נמוכה מדי: נדרש מחזור דולרי יומי ממוצע של לפחות $${Math.round(minDollarVolume).toLocaleString("en-US")}.`); add(gates.definedStop,"אין סטופ מבני מוגדר ואמין."); add(gates.riskReward,"יחס הסיכוי/סיכון נמוך מ-1:2."); add(gates.structuralRoom,"ההתנגדות הבאה קרובה מדי ואינה משאירה מספיק מרווח לעסקה."); add(gates.marketOpen,"המסחר הרגיל אינו פתוח; לא מאשרים כניסה חדשה."); add(gates.eventRiskClear,"אירוע מהותי קרוב מפעיל חסימת כניסה."); add(gates.headlineRiskClear,"זוהתה כותרת חדשותית שלילית קריטית."); add(gates.catalystNotBlocked,"מנוע הקטליזטורים חוסם את העסקה."); add(gates.noChase,"המחיר התרחק מדי מנקודת הכניסה — לא רודפים."); add(gates.portfolioCapacity,"אין כרגע מספיק תקציב סיכון פנוי בתיק."); add(gates.sectorCapacity,`כבר קיימת חשיפה גבוהה מדי לסקטור ${sector??"הנוכחי"}.`); add(gates.noDuplicate,"כבר קיימת עסקה או תוכנית פתוחה באותה מניה.");
+  add(gates.dataQuality,"איכות הנתונים אינה מספיקה לביצוע."); add(gates.dataConfidence,`ציון אמינות המידע נמוך מ-${minDataConfidence}%.`); add(gates.spreadAcceptable,`הספרד רחב מדי לביצוע (${setup.spreadPct?.toFixed(2)??"—"}% > ${maxSpread}%).`); add(gates.secRiskClear,"קיים דיווח SEC טרי שמפעיל חסימת סיכון (למשל גיוס/דילול). "); add(gates.trueMtf,"אין מספיק היסטוריה אמינה בכל טווחי הזמן."); add(gates.liquidity,`הנזילות נמוכה מדי: נדרש מחזור דולרי יומי ממוצע של לפחות $${Math.round(minDollarVolume).toLocaleString("en-US")}.`); add(gates.definedStop,"אין סטופ מבני מוגדר ואמין."); add(gates.riskReward,"יחס הסיכוי/סיכון נמוך מ-1:2."); add(gates.structuralRoom,"ההתנגדות הבאה קרובה מדי ואינה משאירה מספיק מרווח לעסקה."); add(gates.eventRiskClear,"אירוע מהותי קרוב מפעיל חסימת כניסה."); add(gates.headlineRiskClear,"זוהתה כותרת חדשותית שלילית קריטית."); add(gates.catalystNotBlocked,"מנוע הקטליזטורים חוסם את העסקה."); add(gates.noChase,"המחיר התרחק מדי מנקודת הכניסה — לא רודפים."); add(gates.portfolioCapacity,"אין כרגע מספיק תקציב סיכון פנוי בתיק."); add(gates.sectorCapacity,`כבר קיימת חשיפה גבוהה מדי לסקטור ${sector??"הנוכחי"}.`); add(gates.noDuplicate,"כבר קיימת עסקה או תוכנית פתוחה באותה מניה.");
   if(!gates.marketNotRiskOff)warnings.push("השוק במצב Risk-Off ולכן הרף לעסקת לונג גבוה במיוחד."); if(!gates.sectorNotHeadwind)warnings.push("הסקטור מהווה רוח נגדית לעסקה."); if(!gates.relativeVolume)warnings.push("הנפח היחסי עדיין לא מאשר את המהלך."); if(!gates.bullishTrend||!gates.multiTimeframe)warnings.push("המגמה עדיין לא מאושרת מספיק בין טווחי הזמן.");
   const hardFailed = !(
     gates.dataQuality && gates.dataConfidence && gates.spreadAcceptable && gates.secRiskClear && gates.trueMtf && gates.liquidity && gates.definedStop && gates.riskReward &&
-    gates.structuralRoom && gates.marketOpen && gates.eventRiskClear &&
+    gates.structuralRoom && gates.eventRiskClear &&
     gates.headlineRiskClear && gates.catalystNotBlocked && gates.noChase &&
     gates.portfolioCapacity && gates.sectorCapacity && gates.noDuplicate
   );
-  const verdict=hardFailed?"NO_ENTRY":setup.verdict==="ENTER"&&gates.bullishTrend&&gates.multiTimeframe&&gates.relativeVolume?"ENTER":"WAIT";
+  if(!gates.marketOpen)warnings.push("השוק סגור כרגע: ה-Setup יכול להישאר תקף/ARMED, אבל אין אישור ביצוע עד לפתיחת המסחר הרגיל.");if(!gates.sessionPriceVerified)warnings.push("מחיר ה-Pre-Market עדיין לא אומת מספיק לביצוע; איכות ה-Setup נשמרת אך הביצוע ממתין.");
+  const verdict=hardFailed?"NO_ENTRY":gates.marketOpen&&gates.sessionPriceVerified&&setup.verdict==="ENTER"&&gates.bullishTrend&&gates.multiTimeframe&&gates.relativeVolume?"ENTER":"WAIT";
   return{passed:verdict==="ENTER",verdict,blockers,warnings,gates,portfolio:{remainingPct:risk.remainingPct,requiredPct,sameSectorTrades:sameSector,duplicateSymbol:duplicate}};
 }

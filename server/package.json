@@ -1,6 +1,6 @@
 {
   "name": "@trader-os/server",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.0.1",
     "@modelcontextprotocol/sdk": "1.24.0",
-    "@trader-os/shared": "3.0.1",
+    "@trader-os/shared": "3.0.2",
     "zod": "3.25.76"
   },
   "devDependencies": {

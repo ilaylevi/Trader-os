@@ -35,7 +35,7 @@ import { compareRuleVariants } from "./rule-lab.js";
 
 const __dirname=fileURLToPath(new URL(".",import.meta.url));
 const widgetPath=resolve(__dirname,"../../web/dist/component.js"),standaloneAppPath=resolve(__dirname,"../../preview/index.html"),manifestPath=resolve(__dirname,"../../preview/manifest.webmanifest"),swPath=resolve(__dirname,"../../preview/sw.js");
-const PORT=Number(process.env.PORT??8787),MCP_PATH="/mcp",RESOURCE_URI="ui://trader-os/dashboard-v301.html",VERSION="3.0.1",APP_ACCESS_TOKEN=(process.env.APP_ACCESS_TOKEN??"").trim();
+const PORT=Number(process.env.PORT??8787),MCP_PATH="/mcp",RESOURCE_URI="ui://trader-os/dashboard-v302.html",VERSION="3.0.2",APP_ACCESS_TOKEN=(process.env.APP_ACCESS_TOKEN??"").trim();
 function purgeLegacyAiState(){const dir=resolve(process.env.DATA_DIR??"/app/data");for(const f of ["ai-session.json","ai-usage.json","ai-opportunities.json","chat-history.json"]){const p=resolve(dir,f);try{if(existsSync(p))rmSync(p)}catch{}}}
 function isAuthorized(req:IncomingMessage){if(!APP_ACCESS_TOKEN)return true;const auth=req.headers.authorization??"",h=req.headers["x-trader-token"],token=auth.startsWith("Bearer ")?auth.slice(7).trim():Array.isArray(h)?h[0]:h;return token===APP_ACCESS_TOKEN}
 function json(res:ServerResponse,status:number,payload:unknown){res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});res.end(JSON.stringify(payload))}
