@@ -1,0 +1,54 @@
+name: Promote Trader OS v5.1.0
+
+on:
+  push:
+    branches: [v5.1-transfer]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch transfer payload
+        shell: bash
+        run: git fetch origin v5.1-transfer
+
+      - name: Reconstruct and verify payload
+        shell: bash
+        run: |
+          : > /tmp/v51.patch.xz.b85
+          for i in $(seq -w 0 16); do
+            git show origin/v5.1-transfer:.trader-os-v51/part-${i}.b85 >> /tmp/v51.patch.xz.b85
+          done
+          echo "657d74d3f693544d15cdea8ee285ff4b9e7975b5b3c5f379970aea745397c06c  /tmp/v51.patch.xz.b85" | sha256sum -c -
+          python - <<'PY'
+          import base64, lzma, pathlib
+          p = pathlib.Path('/tmp/v51.patch.xz.b85')
+          raw = base64.b85decode(p.read_bytes())
+          patch = lzma.decompress(raw)
+          pathlib.Path('/tmp/v51.patch').write_bytes(patch)
+          PY
+          echo "7f6dcef8444c534cd3635d01224a46cab350cb64e320d947fb91a3d7f91d9fa8  /tmp/v51.patch" | sha256sum -c -
+
+      - name: Apply exact v5.1.0 patch
+        shell: bash
+        run: |
+          git apply --check /tmp/v51.patch
+          git apply /tmp/v51.patch
+          test "$(cat VERSION)" = "5.1.0"
+
+      - name: Commit and promote main
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Trader OS v5.1.0"
+          git push origin HEAD:main
